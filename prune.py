@@ -19,6 +19,7 @@ from utils.torch_utils import select_device, time_synchronized
 from prune_utils import gather_bn_weights, obtain_bn_mask
 from models.common import Bottleneck
 import collections
+import yaml  
 from models.common import *
 from models.yolo import Detect
 from models.yolo import *
@@ -296,6 +297,7 @@ def test(data,
 
 def test_prune(data,
                weights=None,
+               cfg = 'models/yolov5s.yaml',
                batch_size=32,
                imgsz=640,
                conf_thres=0.001,
@@ -358,7 +360,6 @@ def test_prune(data,
         if isinstance(layer, nn.BatchNorm2d):
             if i not in ignore_bn_list:
                 model_list[i] = layer
-                print(i, layer)
             # bnw = layer.state_dict()['weight']
     model_list = {k:v for k,v in model_list.items() if k not in ignore_bn_list}
   #  print("prune module :",model_list.keys())
@@ -391,12 +392,14 @@ def test_prune(data,
     modelstate = model.state_dict()
     # ============================== save pruned model config yaml =================================#
     pruned_yaml = {}
+    with open(cfg, encoding='ascii', errors='ignore') as f:
+        model_yamls = yaml.safe_load(f)  # model dict
     nc = model.model[-1].nc
     pruned_yaml["nc"] = model.model[-1].nc
-    pruned_yaml["depth_multiple"] = 0.33
-    pruned_yaml["width_multiple"] = 0.50
-    pruned_yaml["anchors"] = [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]
-    anchors = [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]
+    pruned_yaml["depth_multiple"] = model_yamls["depth_multiple"]
+    pruned_yaml["width_multiple"] = model_yamls["width_multiple"]
+    pruned_yaml["anchors"] = model_yamls["anchors"]
+    anchors = model_yamls["anchors"]
     pruned_yaml["backbone"] = [
         [-1, 1, Focus, [64, 3]],  # 0-P1/2
         [-1, 1, Conv, [128, 3, 2]],  # 1-P2/4
@@ -447,7 +450,6 @@ def test_prune(data,
             # print("bn_module:", bn_module.bias)
             print(f"|\t{bnname:<25}{'|':<10}{bn_module.weight.data.size()[0]:<20}{'|':<10}{int(mask.sum()):<20}|")
     print("=" * 94)
-   # print(maskbndict.keys())
 
     pruned_model = ModelPruned(maskbndict=maskbndict, cfg=pruned_yaml, ch=3).cuda()
     # Compatibility updates
@@ -746,12 +748,13 @@ def test_prune(data,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--weights', nargs='+', type=str, default='./runs/train/exp4/weights/last.pt',
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/train/exp30/weights/last.pt',
                         help='model.pt path(s)')
-    parser.add_argument('--data', type=str, default='data/mini.yaml', help='*.data path')
-    parser.add_argument('--percent', type=float, default=0.9, help='prune percentage')
-    parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
-    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
+    parser.add_argument('--data', type=str, default='data/voc.yaml', help='*.data path')
+    parser.add_argument('--percent', type=float, default=0.5, help='prune percentage')
+    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
+    parser.add_argument('--img-size', type=int, default=512, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.001, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.6, help='IOU threshold for NMS')
     parser.add_argument('--task', default='val', help='train, val, test, speed or study')
@@ -793,6 +796,7 @@ if __name__ == '__main__':
         print("Test after prune:")
         test_prune(opt.data,
                    opt.weights,
+                   opt.cfg,
                    opt.batch_size,
                    opt.img_size,
                    opt.conf_thres,
